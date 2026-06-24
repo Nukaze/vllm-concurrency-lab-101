@@ -49,3 +49,42 @@ OPEN DECISIONS (decide tmr)
 5. SAVE TO RESULTS?
    - Log the custom prompt + both outputs into results dict?
    - Could be interesting to show in final chart as "your prompt" annotation
+
+---
+
+DRAFT: Student TODO Template Design - TBD
+==========================================
+
+CURRENT STATE (keep as-is for now, revisit tmr)
+-------------------------------------------------
+4 TODO placeholders exist in lab.ipynb:
+  1. baseline_generate - t0, model.generate(), t1        (easy - just timing)
+  2. Exp B baseline loop - call generate + accumulate    (easy - 2 lines)
+  3. vllm_generate - client.chat.completions.create()    (medium - API call)
+  4. Exp B vLLM - asyncio.gather() over batch            (hard - async unpack)
+
+OPEN DECISIONS (decide tmr)
+----------------------------
+1. IS 4 TODOs THE RIGHT AMOUNT?
+   - Too few: students just copy-paste, no learning
+   - Too many: students get lost, kills pacing for 2-3 hr session
+   - Current 4 feels balanced but needs real classroom test
+
+2. DIFFICULTY CURVE OK?
+   - 1 (timing) -> 2 (loop) -> 3 (API) -> 4 (async) feels like good progression
+   - But asyncio.gather with list comprehension + unpack might be too big a jump
+   - Option: give *[vllm_generate_async(p) for p in batch] as hint, student just wraps with gather()
+
+3. SHOULD THERE BE A SOLUTION NOTEBOOK?
+   - lab.ipynb = student version (TODOs)
+   - lab_solution.ipynb = instructor reference (fully filled)
+   - Keep solution out of public repo? or hidden branch?
+
+4. HINT SYSTEM?
+   - Add collapsed hint cells (Colab supports ## cell hiding)
+   - Student can expand if stuck without spoiling immediately
+
+5. WHAT ABOUT VISUALIZATION CELL?
+   - Currently fully given - student just runs it
+   - Could make them fill in one axis label or color choice as low-stakes engagement
+   - Probably not worth it, visualization is not the learning objective here
