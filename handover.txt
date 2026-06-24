@@ -1,0 +1,64 @@
+SESSION HANDOVER - 2026-06-25
+==============================================
+
+WHAT WE BUILT
+--------------
+Teaching material for a 2-3 hr university session: vLLM vs HF Transformers baseline.
+Repo: https://github.com/Nukaze/vllm-concurrency-lab-101 (currently PRIVATE)
+
+Files in repo:
+  lab.ipynb                  - main lab notebook (Colab T4 GPU)
+  vllm-lab-slide-outline.md  - instructor slide outline (18-22 slides)
+  README.md                  - Colab badge + setup guide
+  .gitignore
+
+WHAT THE LAB DOES
+------------------
+3 experiments comparing HF Transformers (naive sequential) vs vLLM:
+  Exp A - Single request latency (time-to-completion)
+  Exp B - Concurrent throughput (N users simultaneously, tokens/sec)
+  Exp C - Output accuracy diff (same weights = near-identical outputs)
+
+Model: Qwen/Qwen2.5-1.5B-Instruct (fixed factor, same for both engines)
+
+KEY TECHNICAL DECISIONS (already implemented + reviewed)
+---------------------------------------------------------
+- uv instead of pip for installs (faster)
+- vllm serve CLI (not deprecated python -m vllm.entrypoints...)
+- apply_chat_template in baseline (apples-to-apples with vLLM chat API)
+- asyncio.get_event_loop().run_until_complete() not asyncio.run() (Colab safe)
+- vLLM logs to vllm_server.log with poll() crash detection
+- --gpu-memory-utilization 0.80, --max-model-len 2048 for T4
+- Thai comments added at all crucial code sections
+- Appendix cell for Windows users (WSL2 setup guide + VRAM table)
+
+NOTEBOOK SOURCE OF TRUTH
+--------------------------
+Always edit create_notebook.py and regenerate - do NOT edit lab.ipynb directly.
+Script: C:\Users\Nukaze\AppData\Local\Temp\claude\...\scratchpad\create_notebook.py
+Regenerate: python create_notebook.py
+Then: git add lab.ipynb && git commit -m "..." && git push
+
+CONVENTIONS
+-----------
+- Conventional commits: feat:, fix:, docs:, chore:, refactor:
+- Refer to assistant as "Claude", user as "Nukaze" (not I/you)
+
+NEXT STEPS
+-----------
+1. [Nukaze] Make repo PUBLIC on GitHub
+   Settings > Danger Zone > Change visibility > Public
+   (required for Colab badge to work)
+
+2. [Nukaze] Dry-run lab.ipynb on real Colab T4 session
+   - Click badge after repo is public
+   - Run all cells top to bottom
+   - Verify Exp A/B/C produce output
+
+3. [Claude] Build slides (if needed)
+   - Outline already exists in vllm-lab-slide-outline.md
+   - Format TBD (Google Slides, Marp, reveal.js?)
+
+4. [Optional] Test local run on socrates (WSL2 + RTX 4060)
+   - WSL2 confirmed working, CUDA passthrough confirmed
+   - Flags to use: --gpu-memory-utilization 0.70 --max-model-len 1024
