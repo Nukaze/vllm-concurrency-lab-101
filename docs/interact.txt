@@ -1,0 +1,51 @@
+DRAFT: Interactive "Wow Moment" Cell - TBD
+==========================================
+
+CONTEXT
+-------
+Currently lab is fully automated: fill TODOs -> run all cells -> see graph.
+No student input, feels passive. Want to add one interactive moment.
+
+CONCEPT
+-------
+Add a cell between Exp A and Exp B where student types their own prompt.
+Both engines (baseline + vLLM) run on it and output side-by-side.
+Student sees the diff with THEIR question, not a canned prompt.
+
+Example interaction:
+  Student types: "อธิบาย blockchain ให้เด็ก ป.6 เข้าใจ"
+
+  --- Baseline output (X.XXs) ---
+  [response]
+
+  --- vLLM output (Y.YYs) ---
+  [response]
+
+  Similarity: 0.97 | vLLM was Zx faster
+
+THIS is the wow moment - personalized, immediate, visible difference.
+
+OPEN DECISIONS (decide tmr)
+---------------------------
+1. INPUT METHOD
+   - input()      : simple, no extra install, stops execution until typed
+   - ipywidgets   : textbox + button, nicer UI, needs import ipywidgets
+   - hardcoded fallback if student skips input? (probably yes)
+
+2. WHERE TO INSERT
+   - Option A: after Exp A results (both engines already warmed up)
+   - Option B: as a standalone cell before Exp B benchmark starts
+   - Option B feels cleaner - natural pause point
+
+3. TEMPLATE QUESTION
+   - Should there be a default prompt pre-filled if student just presses Enter?
+   - Suggested default: "อธิบาย PagedAttention คืออะไร ใน 3 ประโยค"
+     (meta - asking about the thing they just learned)
+
+4. SCOPE
+   - Run on both engines? or just vLLM for speed demo?
+   - Probably both - the diff is the point
+
+5. SAVE TO RESULTS?
+   - Log the custom prompt + both outputs into results dict?
+   - Could be interesting to show in final chart as "your prompt" annotation
