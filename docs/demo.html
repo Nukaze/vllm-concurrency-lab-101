@@ -169,6 +169,35 @@ button {
   .panels, .mem-row { grid-template-columns: 1fr; }
   .sg { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── 3D Mode ── */
+#btn-3d { background: #30363d; color: #e6edf3; }
+#btn-3d:hover { background: #3d444e; }
+#btn-3d.active { background: #8b5cf6; color: #fff; box-shadow: 0 0 10px rgba(139,92,246,0.5); }
+
+#canvas3d-wrap {
+  display: none; position: relative;
+  width: 100%; height: 420px;
+  border-radius: 12px; border: 1px solid #30363d;
+  margin-bottom: 14px; overflow: hidden;
+}
+#canvas3d-wrap.visible { display: block; }
+#canvas3d { display: block; width: 100%; height: 100%; cursor: grab; }
+#canvas3d:active { cursor: grabbing; }
+.lbl3d {
+  position: absolute; pointer-events: none;
+  font-size: 0.58rem; font-weight: 700; letter-spacing: 0.03em;
+  padding: 1px 5px; border-radius: 3px;
+  background: rgba(13,17,23,0.8); white-space: nowrap;
+  transform: translate(-50%, -100%);
+}
+.lbl3d-zone {
+  position: absolute; pointer-events: none;
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 4px;
+  background: rgba(13,17,23,0.7); white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
 </style>
 </head>
 <body>
@@ -184,6 +213,7 @@ button {
     <input type="number" id="mb-input" min="1" max="256" value="16">
     <button id="btn-run">▶ Run</button>
     <button id="btn-reset">↺ Reset</button>
+    <button id="btn-3d">⬡ 3D</button>
   </div>
 </div>
 
@@ -249,6 +279,11 @@ button {
 
 </div>
 
+<!-- 3D Graph Canvas -->
+<div id="canvas3d-wrap">
+  <canvas id="canvas3d"></canvas>
+</div>
+
 <!-- Memory -->
 <div class="mem-row">
   <div class="mem-card">
@@ -277,6 +312,9 @@ button {
   <div class="snote">* Simulation uses compressed time. Actual T4 lab results: HF ~22 tok/s flat, vLLM 776 tok/s @ N=16.</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"
+        integrity="sha384-qOkzR5Ke/XkQxuGVJ9hpFEpDlcoLtWwVYhnJf06cLIZa2vaIptSqaubivErzmD5O"
+        crossorigin="anonymous"></script>
 <script>
 /* ── Config ─────────────────────────────────────────────── */
 let   MAX_BATCH    = 16;    // vLLM max concurrent in batch (user-configurable)
@@ -291,6 +329,326 @@ const HF_COLOR   = '#f39c12';
 const VLLM_COLOR = '#2e86de';
 
 const $ = id => document.getElementById(id);
+
+/* ── Scene3D — Three.js process-flow graph ──────────────── */
+class Scene3D {
+  constructor(canvas) {
+    this.canvas = canvas;
+    const wrap  = canvas.parentElement;
+    const w = wrap.clientWidth  || 860;
+    const h = wrap.clientHeight || 420;
+
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(w, h);
+    this.renderer.setClearColor(0x0d1117, 1);
+
+    this.scene  = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(52, w / h, 0.1, 300);
+    this._camR  = 30;
+    this._camA  = 0.25;
+    this._camY  = 13;
+    this._updateCamera();
+
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const pt = new THREE.PointLight(0xffffff, 0.9, 100);
+    pt.position.set(0, 18, 8);
+    this.scene.add(pt);
+
+    const grid = new THREE.GridHelper(52, 26, 0x1a2030, 0x1a2030);
+    grid.position.y = -4;
+    this.scene.add(grid);
+
+    this._addZoneRings();
+
+    this.nodes      = new Map();
+    this._connMesh  = null;
+    this._connCount = 0;
+
+    // Label overlay
+    this._labelOverlay = document.createElement('div');
+    this._labelOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+    wrap.appendChild(this._labelOverlay);
+    this._labelEls     = new Map();
+    this._zoneLabelEls = [];
+    this._batchLabelEl = null;
+    this._addZoneLabels();
+
+    // Mouse / touch drag to orbit
+    this._drag = { active: false, lastX: 0, lastY: 0 };
+    this._onMouseDown = e => { this._drag.active = true; this._drag.lastX = e.clientX; this._drag.lastY = e.clientY; };
+    this._onMouseUp   = () => { this._drag.active = false; };
+    this._onMouseMove = e => {
+      if (!this._drag.active) return;
+      this._camA += (e.clientX - this._drag.lastX) * 0.006;
+      this._camY  = Math.max(3, Math.min(22, this._camY - (e.clientY - this._drag.lastY) * 0.06));
+      this._drag.lastX = e.clientX; this._drag.lastY = e.clientY;
+      this._updateCamera();
+    };
+    canvas.addEventListener('mousedown', this._onMouseDown);
+    window.addEventListener('mouseup',   this._onMouseUp);
+    window.addEventListener('mousemove', this._onMouseMove);
+
+    canvas.addEventListener('touchstart', e => {
+      const t = e.touches[0]; this._drag.active = true;
+      this._drag.lastX = t.clientX; this._drag.lastY = t.clientY;
+    }, { passive: true });
+    canvas.addEventListener('touchend', () => { this._drag.active = false; });
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const t = e.touches[0];
+      this._camA += (t.clientX - this._drag.lastX) * 0.006;
+      this._camY  = Math.max(3, Math.min(22, this._camY - (t.clientY - this._drag.lastY) * 0.06));
+      this._drag.lastX = t.clientX; this._drag.lastY = t.clientY;
+      this._updateCamera();
+    }, { passive: false });
+
+    this._raf    = null;
+    this._loop   = this._loop.bind(this);
+    this._resize = this._resize.bind(this);
+    window.addEventListener('resize', this._resize);
+  }
+
+  _updateCamera() {
+    this.camera.position.set(
+      Math.sin(this._camA) * this._camR,
+      this._camY,
+      Math.cos(this._camA) * this._camR
+    );
+    this.camera.lookAt(0, 0, 0);
+  }
+
+  _addZoneRings() {
+    const geo = new THREE.TorusGeometry(2.0, 0.055, 8, 36);
+    [{ c: 0xf39c12, z: -4 }, { c: 0x2e86de, z: 4 }].forEach(({ c, z }) =>
+      [-12, 0, 12].forEach(x => {
+        const m = new THREE.Mesh(geo.clone(),
+          new THREE.MeshBasicMaterial({ color: c, opacity: 0.22, transparent: true }));
+        m.position.set(x, 0, z);
+        m.rotation.x = Math.PI / 2;
+        this.scene.add(m);
+      })
+    );
+  }
+
+  _addZoneLabels() {
+    // Lane labels (leftmost, describing each row)
+    [
+      { pos: new THREE.Vector3(-16, 0, -4), text: '🟠 HF Baseline', color: '#f39c12' },
+      { pos: new THREE.Vector3(-16, 0,  4), text: '🔵 vLLM',        color: '#2e86de' },
+    ].forEach(({ pos, text, color }) => {
+      const el = document.createElement('div');
+      el.className = 'lbl3d-zone'; el.textContent = text; el.style.color = color;
+      this._labelOverlay.appendChild(el);
+      this._zoneLabelEls.push({ el, pos3d: pos });
+    });
+
+    // Zone labels (Queue / GPU / Done header above each ring)
+    [
+      { x: -12, z: -4 }, { x: 0, z: -4 }, { x: 12, z: -4 },
+      { x: -12, z:  4 }, { x: 0, z:  4 }, { x: 12, z:  4 },
+    ].forEach(({ x, z }, i) => {
+      const label = ['Queue', 'GPU', 'Done'][i % 3];
+      const color = z < 0 ? '#f39c12' : '#2e86de';
+      const el = document.createElement('div');
+      el.className = 'lbl3d-zone'; el.textContent = label; el.style.color = color;
+      this._labelOverlay.appendChild(el);
+      this._zoneLabelEls.push({ el, pos3d: new THREE.Vector3(x, 3.2, z) });
+    });
+
+    // Batch connection label (dynamic — shown when vLLM batch has edges)
+    this._batchLabelEl = document.createElement('div');
+    this._batchLabelEl.className = 'lbl3d-zone';
+    this._batchLabelEl.textContent = 'Continuous Batch';
+    this._batchLabelEl.style.color = '#2e86de';
+    this._batchLabelEl.style.display = 'none';
+    this._labelOverlay.appendChild(this._batchLabelEl);
+  }
+
+  // Queue = octahedron (diamond), GPU = icosahedron (spiky/energetic), Done = box (settled)
+  _nodeMesh(col, state) {
+    const geo = state === 'queue'
+      ? new THREE.OctahedronGeometry(0.42)
+      : state === 'gpu'
+        ? new THREE.IcosahedronGeometry(0.48)
+        : new THREE.BoxGeometry(0.55, 0.55, 0.55);
+    const intensity = state === 'queue' ? 0.15 : state === 'gpu' ? 0.45 : 0.1;
+    return new THREE.Mesh(geo,
+      new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: intensity, shininess: 70 }));
+  }
+
+  _pos(lane, state, idx, total) {
+    const z = lane === 'hf' ? -4 : 4;
+    if (state === 'queue')
+      return new THREE.Vector3(-12 + (idx % 5) * 0.9 - 1.8, Math.floor(idx / 5) * 0.9 - 1.5, z);
+    if (state === 'gpu') {
+      if (lane === 'hf') return new THREE.Vector3(0, 0, z);
+      const a = (idx / Math.max(total, 1)) * Math.PI * 2;
+      const r = Math.min(1.0 + total * 0.22, 3.2);
+      return new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r * 0.55, z);
+    }
+    return new THREE.Vector3(12 + (idx % 6) * 0.85 - 2.1, Math.floor(idx / 6) * 0.85 - 1.5, z);
+  }
+
+  update(s) {
+    this._sync('hf',   0xf39c12, s.hf);
+    this._sync('vllm', 0x2e86de, s.vllm);
+  }
+
+  _sync(lane, col, ls) {
+    const seen  = new Set();
+    const batch = lane === 'hf'
+      ? (ls.current ? [ls.current] : [])
+      : ls.batch;
+
+    const ensure = (id, state, idx, total) => {
+      const k = `${lane}-${id}`;
+      seen.add(k);
+      let e = this.nodes.get(k);
+      if (!e) {
+        const mesh = this._nodeMesh(col, state);
+        mesh.position.copy(this._pos(lane, state, idx, total));
+        this.scene.add(mesh);
+        e = { mesh, state, col };
+        this.nodes.set(k, e);
+      } else if (e.state !== state) {
+        // Swap to new geometry on state transition
+        const pos = e.mesh.position.clone();
+        this.scene.remove(e.mesh);
+        const mesh = this._nodeMesh(col, state);
+        mesh.position.copy(pos);
+        this.scene.add(mesh);
+        e.mesh = mesh; e.state = state;
+      }
+      e.target = this._pos(lane, state, idx, total);
+    };
+
+    ls.queue.forEach((id, i)  => ensure(id,     'queue', i, 0));
+    batch.forEach((req, i)    => ensure(req.id,  'gpu',   i, batch.length));
+    ls.done.forEach((id, i)   => ensure(id,      'done',  i, 0));
+
+    for (const [k, e] of this.nodes)
+      if (k.startsWith(lane + '-') && !seen.has(k)) {
+        this.scene.remove(e.mesh); this.nodes.delete(k);
+      }
+  }
+
+  _rebuildConn() {
+    const gpu = [];
+    for (const [k, e] of this.nodes)
+      if (k.startsWith('vllm-') && e.state === 'gpu') gpu.push(e.mesh);
+
+    if (gpu.length !== this._connCount) {
+      if (this._connMesh) { this.scene.remove(this._connMesh); this._connMesh = null; }
+      this._connCount = gpu.length;
+      if (gpu.length < 2) return;
+      const pairs = gpu.length * (gpu.length - 1);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pairs * 3), 3));
+      this._connMesh = new THREE.LineSegments(geo,
+        new THREE.LineBasicMaterial({ color: 0x2e86de, opacity: 0.28, transparent: true }));
+      this.scene.add(this._connMesh);
+    }
+    if (!this._connMesh || gpu.length < 2) return;
+    const attr = this._connMesh.geometry.attributes.position;
+    let ai = 0;
+    for (let i = 0; i < gpu.length; i++)
+      for (let j = i + 1; j < gpu.length; j++) {
+        const a = gpu[i].position, b = gpu[j].position;
+        attr.array[ai++] = a.x; attr.array[ai++] = a.y; attr.array[ai++] = a.z;
+        attr.array[ai++] = b.x; attr.array[ai++] = b.y; attr.array[ai++] = b.z;
+      }
+    attr.needsUpdate = true;
+  }
+
+  _updateLabels() {
+    const W = this.canvas.clientWidth, H = this.canvas.clientHeight;
+    if (!W || !H) return;
+    const shown = new Set();
+
+    for (const [k, e] of this.nodes) {
+      shown.add(k);
+      const [lane, id] = k.split('-');
+      if (!this._labelEls.has(k)) {
+        const d = document.createElement('div');
+        d.className = 'lbl3d';
+        d.textContent = `U${id}`;
+        d.style.color = lane === 'hf' ? '#f39c12' : '#2e86de';
+        this._labelOverlay.appendChild(d);
+        this._labelEls.set(k, d);
+      }
+      const d = this._labelEls.get(k);
+      const p = e.mesh.position.clone().project(this.camera);
+      if (p.z >= 1) { d.style.display = 'none'; continue; }
+      d.style.display = '';
+      d.style.left = `${(p.x * 0.5 + 0.5) * W}px`;
+      d.style.top  = `${(-p.y * 0.5 + 0.5) * H - 18}px`;
+    }
+
+    for (const [k, d] of this._labelEls)
+      if (!shown.has(k)) { d.remove(); this._labelEls.delete(k); }
+
+    for (const { el, pos3d } of this._zoneLabelEls) {
+      const p = pos3d.clone().project(this.camera);
+      el.style.display = p.z >= 1 ? 'none' : '';
+      el.style.left = `${(p.x * 0.5 + 0.5) * W}px`;
+      el.style.top  = `${(-p.y * 0.5 + 0.5) * H}px`;
+    }
+
+    // Batch edge label near vLLM GPU center
+    const hasBatch = this._connCount >= 2;
+    this._batchLabelEl.style.display = hasBatch ? '' : 'none';
+    if (hasBatch) {
+      const p = new THREE.Vector3(0, 4.5, 4).project(this.camera);
+      if (p.z < 1) {
+        this._batchLabelEl.style.left = `${(p.x * 0.5 + 0.5) * W}px`;
+        this._batchLabelEl.style.top  = `${(-p.y * 0.5 + 0.5) * H}px`;
+      }
+    }
+  }
+
+  _loop() {
+    this._raf = requestAnimationFrame(this._loop);
+    const t = Date.now() * 0.001;
+    for (const e of this.nodes.values()) {
+      if (e.target) e.mesh.position.lerp(e.target, 0.09);
+      if (e.state === 'gpu') e.mesh.material.emissiveIntensity = 0.45 + Math.sin(t * 3.5) * 0.2;
+    }
+    this._rebuildConn();
+    this._updateLabels();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  start()  { if (!this._raf) this._raf = requestAnimationFrame(this._loop); }
+  stop()   { if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; } }
+
+  clear() {
+    for (const e of this.nodes.values()) this.scene.remove(e.mesh);
+    this.nodes.clear();
+    if (this._connMesh) { this.scene.remove(this._connMesh); this._connMesh = null; }
+    this._connCount = 0;
+    for (const d of this._labelEls.values()) d.remove();
+    this._labelEls.clear();
+  }
+
+  _resize() {
+    const wrap = this.canvas.parentElement;
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  dispose() {
+    this.stop();
+    canvas.removeEventListener('mousedown', this._onMouseDown);
+    window.removeEventListener('mouseup',   this._onMouseUp);
+    window.removeEventListener('mousemove', this._onMouseMove);
+    window.removeEventListener('resize',    this._resize);
+    this._labelOverlay.remove();
+    this.renderer.dispose();
+  }
+}
 
 /* ── Chip helpers ───────────────────────────────────────── */
 function makeChip(prefix, id, panelColor, cls='') {
@@ -498,6 +856,21 @@ class Sim {
     this.tickId = null;
   }
 
+  getState() {
+    return {
+      hf: {
+        queue:   [...this.hfQueue],
+        current: this.hfCurrent ? { id: this.hfCurrent.id, progress: this.hfCurrent.progress } : null,
+        done:    [...this.hfDoneList]
+      },
+      vllm: {
+        queue: [...this.vQueue],
+        batch: this.vBatch.map(r => ({ id: r.id, progress: r.progress })),
+        done:  [...this.vDoneList]
+      }
+    };
+  }
+
   _initDOM() {
     renderQueue('hf-queue',   this.hfQueue, this.n, HF_COLOR);
     renderQueue('vllm-queue', this.vQueue,  this.n, VLLM_COLOR);
@@ -530,6 +903,7 @@ class Sim {
     const elapsed = performance.now() - this.t0;
     if (!this.hfDone) this._tickHF(elapsed);
     if (!this.vDone)  this._tickVLLM(elapsed);
+    if (_scene3d) _scene3d.update(this.getState());
     if (this.hfDone && this.vDone) {
       this.stop();
       this._showSummary();
@@ -635,7 +1009,7 @@ class Sim {
 }
 
 /* ── Controls ───────────────────────────────────────────── */
-let N = 16, sim = null;
+let N = 16, sim = null, _scene3d = null;
 
 function setN(val) {
   const parsed = parseInt(val);
@@ -684,6 +1058,7 @@ $('btn-run').addEventListener('click', () => {
 $('btn-reset').addEventListener('click', () => {
   if (sim) sim.stop();
   sim = null;
+  if (_scene3d) _scene3d.clear();
   $('btn-run').disabled  = false;
   $('n-slider').disabled = false;
   $('n-input').disabled  = false;
@@ -700,6 +1075,22 @@ $('btn-reset').addEventListener('click', () => {
   initMem('hf-mem');
   initMem('vllm-mem');
   $('summary').style.display = 'none';
+});
+
+/* ── 3D Toggle ──────────────────────────────────────────── */
+$('btn-3d').addEventListener('click', () => {
+  const on = $('canvas3d-wrap').classList.toggle('visible');
+  document.querySelector('.panels').style.display  = on ? 'none' : '';
+  document.querySelector('.mem-row').style.display = on ? 'none' : '';
+  $('btn-3d').textContent = on ? '⬡ Flat' : '⬡ 3D';
+  $('btn-3d').classList.toggle('active', on);
+  if (on) {
+    if (!_scene3d) _scene3d = new Scene3D($('canvas3d'));
+    _scene3d.start();
+    if (sim) _scene3d.update(sim.getState());
+  } else {
+    if (_scene3d) _scene3d.stop();
+  }
 });
 
 /* ── Init ───────────────────────────────────────────────── */
