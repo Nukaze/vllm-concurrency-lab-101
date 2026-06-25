@@ -171,9 +171,27 @@ button {
 }
 
 /* ── 3D Mode ── */
-#btn-3d { background: #30363d; color: #e6edf3; }
-#btn-3d:hover { background: #3d444e; }
-#btn-3d.active { background: #8b5cf6; color: #fff; box-shadow: 0 0 10px rgba(139,92,246,0.5); }
+.toggle-3d {
+  display: inline-flex; position: relative; align-items: center;
+  background: #21262d; border: 1px solid #30363d;
+  border-radius: 20px; padding: 3px;
+  cursor: pointer; user-select: none;
+}
+.toggle-3d::before {
+  content: '';
+  position: absolute; top: 3px; bottom: 3px; left: 3px;
+  width: 44px; background: #8b5cf6; border-radius: 14px;
+  transition: left 0.22s cubic-bezier(.4,0,.2,1);
+}
+.toggle-3d.active::before { left: 47px; }
+.t-flat, .t-3d {
+  position: relative; z-index: 1;
+  width: 44px; text-align: center;
+  padding: 4px 0; font-size: 0.8rem; font-weight: 600;
+  color: #8b949e; transition: color 0.22s;
+}
+.toggle-3d:not(.active) .t-flat { color: #fff; }
+.toggle-3d.active .t-3d { color: #fff; }
 
 #canvas3d-wrap {
   display: none; position: relative;
@@ -213,7 +231,10 @@ button {
     <input type="number" id="mb-input" min="1" max="256" value="16">
     <button id="btn-run">▶ Run</button>
     <button id="btn-reset">↺ Reset</button>
-    <button id="btn-3d">⬡ 3D</button>
+    <div class="toggle-3d" id="btn-3d" role="button" tabindex="0">
+      <span class="t-flat">Flat</span>
+      <span class="t-3d">3D</span>
+    </div>
   </div>
 </div>
 
@@ -345,9 +366,9 @@ class Scene3D {
 
     this.scene  = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(52, w / h, 0.1, 300);
-    this._camR  = 30;
-    this._camA  = 0.25;
-    this._camY  = 13;
+    this._camR  = 40;
+    this._camA  = 150;
+    this._camY  = 30;
     this._updateCamera();
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.45));
@@ -355,7 +376,7 @@ class Scene3D {
     pt.position.set(0, 18, 8);
     this.scene.add(pt);
 
-    const grid = new THREE.GridHelper(52, 26, 0x1a2030, 0x1a2030);
+    const grid = new THREE.GridHelper(80, 40, 0x1a2030, 0x1a2030);
     grid.position.y = -4;
     this.scene.add(grid);
 
@@ -419,9 +440,9 @@ class Scene3D {
   }
 
   _addZoneRings() {
-    const geo = new THREE.TorusGeometry(2.0, 0.055, 8, 36);
-    [{ c: 0xf39c12, z: -4 }, { c: 0x2e86de, z: 4 }].forEach(({ c, z }) =>
-      [-12, 0, 12].forEach(x => {
+    const geo = new THREE.TorusGeometry(2.8, 0.07, 8, 36);
+    [{ c: 0xf39c12, z: -7 }, { c: 0x2e86de, z: 7 }].forEach(({ c, z }) =>
+      [-20, 0, 20].forEach(x => {
         const m = new THREE.Mesh(geo.clone(),
           new THREE.MeshBasicMaterial({ color: c, opacity: 0.22, transparent: true }));
         m.position.set(x, 0, z);
@@ -434,8 +455,8 @@ class Scene3D {
   _addZoneLabels() {
     // Lane labels (leftmost, describing each row)
     [
-      { pos: new THREE.Vector3(-16, 0, -4), text: '🟠 HF Baseline', color: '#f39c12' },
-      { pos: new THREE.Vector3(-16, 0,  4), text: '🔵 vLLM',        color: '#2e86de' },
+      { pos: new THREE.Vector3(-25, 0, -7), text: '🟠 HF Baseline', color: '#f39c12' },
+      { pos: new THREE.Vector3(-25, 0,  7), text: '🔵 vLLM',        color: '#2e86de' },
     ].forEach(({ pos, text, color }) => {
       const el = document.createElement('div');
       el.className = 'lbl3d-zone'; el.textContent = text; el.style.color = color;
@@ -445,15 +466,19 @@ class Scene3D {
 
     // Zone labels (Queue / GPU / Done header above each ring)
     [
-      { x: -12, z: -4 }, { x: 0, z: -4 }, { x: 12, z: -4 },
-      { x: -12, z:  4 }, { x: 0, z:  4 }, { x: 12, z:  4 },
-    ].forEach(({ x, z }, i) => {
-      const label = ['Queue', 'GPU', 'Done'][i % 3];
+      { x: -20, z: -7, lane: 'hf',   state: 'queue' },
+      { x:   0, z: -7, lane: 'hf',   state: 'gpu'   },
+      { x:  20, z: -7, lane: 'hf',   state: 'done'  },
+      { x: -20, z:  7, lane: 'vllm', state: 'queue' },
+      { x:   0, z:  7, lane: 'vllm', state: 'gpu'   },
+      { x:  20, z:  7, lane: 'vllm', state: 'done'  },
+    ].forEach(({ x, z, lane, state }) => {
+      const base  = state.charAt(0).toUpperCase() + state.slice(1);
       const color = z < 0 ? '#f39c12' : '#2e86de';
       const el = document.createElement('div');
-      el.className = 'lbl3d-zone'; el.textContent = label; el.style.color = color;
+      el.className = 'lbl3d-zone'; el.textContent = base; el.style.color = color;
       this._labelOverlay.appendChild(el);
-      this._zoneLabelEls.push({ el, pos3d: new THREE.Vector3(x, 3.2, z) });
+      this._zoneLabelEls.push({ el, pos3d: new THREE.Vector3(x, 3.2, z), lane, state });
     });
 
     // Batch connection label (dynamic — shown when vLLM batch has edges)
@@ -478,16 +503,19 @@ class Scene3D {
   }
 
   _pos(lane, state, idx, total) {
-    const z = lane === 'hf' ? -4 : 4;
+    const z = lane === 'hf' ? -7 : 7;
+    const cols = 9, sp = 0.85;
     if (state === 'queue')
-      return new THREE.Vector3(-12 + (idx % 5) * 0.9 - 1.8, Math.floor(idx / 5) * 0.9 - 1.5, z);
+      return new THREE.Vector3(-20 + (idx % cols) * sp - (cols / 2 - 0.5) * sp,
+                               Math.floor(idx / cols) * sp - 1.5, z);
     if (state === 'gpu') {
       if (lane === 'hf') return new THREE.Vector3(0, 0, z);
       const a = (idx / Math.max(total, 1)) * Math.PI * 2;
-      const r = Math.min(1.0 + total * 0.22, 3.2);
+      const r = Math.min(1.4 + total * 0.22, 4.2);
       return new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r * 0.55, z);
     }
-    return new THREE.Vector3(12 + (idx % 6) * 0.85 - 2.1, Math.floor(idx / 6) * 0.85 - 1.5, z);
+    return new THREE.Vector3(20 + (idx % cols) * sp - (cols / 2 - 0.5) * sp,
+                             Math.floor(idx / cols) * sp - 1.5, z);
   }
 
   update(s) {
@@ -564,11 +592,19 @@ class Scene3D {
   _updateLabels() {
     const W = this.canvas.clientWidth, H = this.canvas.clientHeight;
     if (!W || !H) return;
-    const shown = new Set();
+    // Count nodes per lane+state to decide label density
+    const zoneCounts = {};
+    for (const [k, e] of this.nodes) {
+      const key = `${k.split('-')[0]}-${e.state}`;
+      zoneCounts[key] = (zoneCounts[key] || 0) + 1;
+    }
 
+    const shown = new Set();
     for (const [k, e] of this.nodes) {
       shown.add(k);
       const [lane, id] = k.split('-');
+      const zoneKey  = `${lane}-${e.state}`;
+      const showLabel = e.state === 'gpu' || (zoneCounts[zoneKey] || 0) <= 9;
       if (!this._labelEls.has(k)) {
         const d = document.createElement('div');
         d.className = 'lbl3d';
@@ -578,6 +614,7 @@ class Scene3D {
         this._labelEls.set(k, d);
       }
       const d = this._labelEls.get(k);
+      if (!showLabel) { d.style.display = 'none'; continue; }
       const p = e.mesh.position.clone().project(this.camera);
       if (p.z >= 1) { d.style.display = 'none'; continue; }
       d.style.display = '';
@@ -588,7 +625,12 @@ class Scene3D {
     for (const [k, d] of this._labelEls)
       if (!shown.has(k)) { d.remove(); this._labelEls.delete(k); }
 
-    for (const { el, pos3d } of this._zoneLabelEls) {
+    for (const { el, pos3d, lane, state } of this._zoneLabelEls) {
+      if (lane && state) {
+        const n    = zoneCounts[`${lane}-${state}`] || 0;
+        const base = state.charAt(0).toUpperCase() + state.slice(1);
+        el.textContent = n > 0 ? `${base} · ${n}` : base;
+      }
       const p = pos3d.clone().project(this.camera);
       el.style.display = p.z >= 1 ? 'none' : '';
       el.style.left = `${(p.x * 0.5 + 0.5) * W}px`;
@@ -599,7 +641,7 @@ class Scene3D {
     const hasBatch = this._connCount >= 2;
     this._batchLabelEl.style.display = hasBatch ? '' : 'none';
     if (hasBatch) {
-      const p = new THREE.Vector3(0, 4.5, 4).project(this.camera);
+      const p = new THREE.Vector3(0, 4.5, 7).project(this.camera);
       if (p.z < 1) {
         this._batchLabelEl.style.left = `${(p.x * 0.5 + 0.5) * W}px`;
         this._batchLabelEl.style.top  = `${(-p.y * 0.5 + 0.5) * H}px`;
@@ -1082,7 +1124,6 @@ $('btn-3d').addEventListener('click', () => {
   const on = $('canvas3d-wrap').classList.toggle('visible');
   document.querySelector('.panels').style.display  = on ? 'none' : '';
   document.querySelector('.mem-row').style.display = on ? 'none' : '';
-  $('btn-3d').textContent = on ? '⬡ Flat' : '⬡ 3D';
   $('btn-3d').classList.toggle('active', on);
   if (on) {
     if (!_scene3d) _scene3d = new Scene3D($('canvas3d'));
@@ -1094,9 +1135,10 @@ $('btn-3d').addEventListener('click', () => {
 });
 
 /* ── Init ───────────────────────────────────────────────── */
-setN(16); // default
+setN(16);
 initMem('hf-mem');
 initMem('vllm-mem');
+$('btn-3d').click();
 </script>
 </body>
 </html>
