@@ -106,11 +106,11 @@ def baseline_generate(prompt):
     )
     inputs = tokenizer(text_input, return_tensors='pt').to(model.device)
     with torch.no_grad():
-        t0 = time.perf_counter()
+        t0 = time.perf_counter()  # จับเวลาเริ่มต้น ก่อนที่ GPU จะเริ่มคำนวณ
 
-        output = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS, do_sample=False)
+        output = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS, do_sample=False)  # รัน autoregressive decoding บน GPU, do_sample=False = greedy (ไม่สุ่ม)
 
-        t1 = time.perf_counter()
+        t1 = time.perf_counter()  # จับเวลาสิ้นสุด หลัง GPU generate ครบทุก token แล้ว
 
     generated_ids = output[0][inputs['input_ids'].shape[1]:]
     text = tokenizer.decode(generated_ids, skip_special_tokens=True)
@@ -149,8 +149,8 @@ for n in CONCURRENCY_LEVELS:
     # loop นี้คือ naive serving - ประมวลผลทีละ request ไม่มี batching
     # จำลองว่า server ธรรมดารับ user 1 คนต่อครั้ง user ที่เหลือรอคิว
     for prompt in batch:
-        _, _, n_tok = baseline_generate(prompt)
-        total_tokens += n_tok
+        _, _, n_tok = baseline_generate(prompt)  # เรียก baseline สร้าง output, รับเฉพาะ n_tokens กลับมา (ทิ้ง text และ latency)
+        total_tokens += n_tok  # สะสม token รวมของทุก request ใน batch นี้ เพื่อคำนวณ throughput ทีหลัง
     elapsed = time.perf_counter() - t0
     throughput = total_tokens / elapsed
     baseline_exp_b[n] = throughput
@@ -170,11 +170,11 @@ client = OpenAI(base_url='http://localhost:8000/v1', api_key='dummy')
 
 def vllm_generate(prompt):
     t0 = time.perf_counter()
-    resp = client.chat.completions.create(
-        model=MODEL_ID,
-        messages=[{'role': 'user', 'content': prompt}],
-        max_tokens=MAX_NEW_TOKENS,
-        temperature=0,
+    resp = client.chat.completions.create(  # ส่ง HTTP POST ไปยัง vLLM server ที่ localhost:8000 (OpenAI-compatible API)
+        model=MODEL_ID,  # ชื่อ model ที่ serve อยู่บน server ต้องตรงกับที่ vLLM โหลดไว้
+        messages=[{'role': 'user', 'content': prompt}],  # prompt ในรูปแบบ chat message เหมือน ChatGPT API
+        max_tokens=MAX_NEW_TOKENS,  # จำกัด output tokens ให้เท่ากับ baseline เพื่อเทียบกันได้
+        temperature=0,  # greedy decoding ไม่สุ่ม ผลลัพธ์ deterministic เหมือน do_sample=False
     )
     latency = time.perf_counter() - t0
     text = resp.choices[0].message.content
@@ -221,7 +221,7 @@ async def run_concurrent(n):
     t0 = time.perf_counter()
     # asyncio.gather ส่ง request ทุกตัวพร้อมกันในทีเดียว
     # vLLM ฝั่ง server รับทุก request แล้วจัดการผ่าน continuous batching อัตโนมัติ
-    token_counts = await asyncio.gather(*[vllm_generate_async(p) for p in batch])
+    token_counts = await asyncio.gather(*[vllm_generate_async(p) for p in batch])  # สร้าง coroutine ทุกตัวแล้วส่งพร้อมกัน, await รอจนทุก request ตอบกลับครบ
     elapsed = time.perf_counter() - t0
     return sum(token_counts) / elapsed
 
