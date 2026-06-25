@@ -59,6 +59,8 @@ vllm-concurrency-lab-101/
     └── vllm-lab-slide-outline.md   -- outline สไลด์สำหรับผู้สอน
 ```
 
+> **อ่านไฟล์ `.md` ในเบราว์เซอร์:** ติดตั้ง extension **Simply Markdown Viewer** (Chrome/Edge) แล้วลาก `.md` ใส่เบราว์เซอร์ได้เลย ไม่ต้องใช้ editor
+
 ---
 
 ## ผลที่คาดว่าจะเห็น (บน T4 free tier)
