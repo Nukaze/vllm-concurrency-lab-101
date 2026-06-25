@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Serving Simulator — Baseline vs vLLM</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0d1117; color: #e6edf3;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  padding: 20px; min-height: 100vh;
+}
+
+/* ── Header ── */
+.header { text-align: center; margin-bottom: 22px; }
+.header h1 { font-size: 1.7rem; margin-bottom: 4px; }
+.header p  { color: #8b949e; font-size: 0.9rem; margin-bottom: 16px; }
+
+.controls {
+  display: flex; align-items: center; gap: 12px;
+  justify-content: center; flex-wrap: wrap;
+}
+.controls label { font-size: 0.9rem; color: #8b949e; }
+#n-input, #mb-input {
+  width: 80px; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid #30363d; background: #21262d; color: #e6edf3;
+  font-size: 0.9rem; font-weight: 700; text-align: center; outline: none;
+}
+#n-input:focus  { border-color: #2e86de; }
+#mb-input:focus { border-color: #2e86de; }
+#n-input:disabled, #mb-input:disabled { opacity: 0.35; cursor: not-allowed; }
+input[type="range"] {
+  -webkit-appearance: none; width: 200px; height: 6px;
+  background: #30363d; border-radius: 3px; outline: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px;
+  background: #2e86de; border-radius: 50%; cursor: pointer;
+}
+input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
+
+button {
+  padding: 7px 18px; border: none; border-radius: 6px;
+  font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: 0.15s;
+}
+#btn-run   { background: #2ecc71; color: #0d1117; }
+#btn-run:hover   { background: #27ae60; }
+#btn-run:disabled { background: #30363d; color: #8b949e; cursor: not-allowed; }
+#btn-reset { background: #30363d; color: #e6edf3; }
+#btn-reset:hover { background: #3d444e; }
+
+.badge-info {
+  font-size: 0.8rem; background: #21262d; border: 1px solid #30363d;
+  border-radius: 6px; padding: 4px 10px; color: #8b949e;
+}
+.badge-info strong { color: #2e86de; }
+
+/* ── Panels ── */
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+.panel {
+  background: #161b22; border-radius: 12px;
+  padding: 16px; border: 1px solid #30363d;
+}
+.panel-title {
+  font-size: 0.95rem; font-weight: 700; margin-bottom: 12px;
+  padding-bottom: 8px; border-bottom: 2px solid;
+  display: flex; align-items: center; gap: 8px;
+}
+.panel.hf   .panel-title { color: #f39c12; border-color: #f39c12; }
+.panel.vllm .panel-title { color: #2e86de;  border-color: #2e86de; }
+.panel-title .sub { font-size: 0.68rem; font-weight: 400; color: #8b949e; }
+
+.lbl {
+  font-size: 0.67rem; color: #8b949e; text-transform: uppercase;
+  letter-spacing: 0.08em; font-weight: 600; margin-bottom: 5px;
+}
+
+/* ── Chip row ── */
+.chip-row {
+  display: flex; flex-wrap: wrap; gap: 4px; min-height: 40px;
+  padding: 6px; background: #0d1117; border-radius: 8px;
+  align-items: flex-start; align-content: flex-start;
+}
+.chip {
+  width: 32px; height: 32px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.62rem; font-weight: 700; flex-shrink: 0;
+}
+.chip.dim  { opacity: 0.38; }
+.chip.glow { animation: glow 0.7s ease-in-out infinite alternate; }
+@keyframes glow { to { filter: brightness(1.4) drop-shadow(0 0 5px currentColor); } }
+.more-badge {
+  background: #21262d; border: 1px solid #30363d; border-radius: 5px;
+  font-size: 0.65rem; color: #8b949e; padding: 0 7px;
+  display: flex; align-items: center; height: 32px;
+  white-space: nowrap;
+}
+
+/* ── GPU area ── */
+.gpu-box {
+  background: #0d1117; border-radius: 8px; padding: 9px;
+  min-height: 60px; display: flex; flex-direction: column; gap: 6px;
+}
+.gpu-idle { color: #30363d; font-size: 0.82rem; font-style: italic; text-align: center; padding: 14px 0; }
+.slot {
+  display: flex; align-items: center; gap: 7px;
+  background: #161b22; border-radius: 5px; padding: 5px 9px;
+}
+.slot-lbl { font-size: 0.66rem; font-weight: 700; min-width: 28px; }
+.track { flex: 1; height: 9px; background: #30363d; border-radius: 4px; overflow: hidden; }
+.fill  { height: 100%; border-radius: 4px; transition: width 55ms linear; width: 0%; }
+.slot-pct { font-size: 0.66rem; color: #8b949e; min-width: 30px; text-align: right; }
+.batch-info {
+  font-size: 0.72rem; color: #8b949e; padding: 3px 0 1px;
+  display: flex; align-items: center; gap: 6px;
+}
+.batch-fill-bar {
+  flex: 1; height: 5px; background: #21262d; border-radius: 3px; overflow: hidden;
+}
+.batch-fill-inner { height: 100%; background: #2e86de; border-radius: 3px; transition: width 0.2s; }
+.more-slots { font-size: 0.7rem; color: #8b949e; padding: 2px 4px; }
+
+/* ── Done strip ── */
+.done-strip {
+  min-height: 34px; padding: 5px; background: #0d1117; border-radius: 8px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+}
+.done-count {
+  font-size: 0.85rem; font-weight: 700; padding: 3px 8px;
+  background: #21262d; border-radius: 5px;
+}
+
+/* ── Stats ── */
+.stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; margin-top: 10px; }
+.stat {
+  background: #0d1117; border-radius: 7px; padding: 8px 6px;
+  text-align: center; border: 1px solid #30363d;
+}
+.stat-v { font-size: 1.05rem; font-weight: 700; }
+.stat-l { font-size: 0.62rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+.panel.hf   .stat-v { color: #f39c12; }
+.panel.vllm .stat-v { color: #2e86de; }
+
+/* ── Memory ── */
+.mem-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.mem-card { background: #161b22; border-radius: 10px; padding: 13px; border: 1px solid #30363d; }
+.mem-card h3 { font-size: 0.8rem; color: #8b949e; margin-bottom: 9px; }
+.mem-grid { display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; }
+.mc { height: 11px; border-radius: 1px; background: #21262d; transition: background 0.25s, opacity 0.25s; }
+.mem-note { font-size: 0.67rem; color: #8b949e; margin-top: 7px; }
+
+/* ── Summary ── */
+.summary {
+  display: none; background: #161b22; border-radius: 12px;
+  padding: 20px; border: 1px solid #2ecc71; text-align: center;
+}
+.summary h2 { color: #2ecc71; font-size: 1.2rem; margin-bottom: 14px; }
+.sg { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; max-width: 540px; margin: 0 auto; }
+.si { background: #0d1117; border-radius: 8px; padding: 11px; }
+.sv { font-size: 1.45rem; font-weight: 800; line-height: 1.1; }
+.sl { font-size: 0.67rem; color: #8b949e; margin-top: 3px; }
+.green { color: #2ecc71; }
+.snote { font-size: 0.68rem; color: #8b949e; margin-top: 12px; }
+
+@media (max-width: 700px) {
+  .panels, .mem-row { grid-template-columns: 1fr; }
+  .sg { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>LLM Serving Simulator</h1>
+  <p>Same model weights &nbsp;·&nbsp; Same GPU &nbsp;·&nbsp; <strong style="color:#e6edf3">Different engine</strong></p>
+  <div class="controls">
+    <label>Concurrent Requests:</label>
+    <input type="range" id="n-slider" min="1" max="100" value="16">
+    <input type="number" id="n-input" min="1" max="100000" value="16">
+    <label style="margin-left:8px">vLLM max batch:</label>
+    <input type="number" id="mb-input" min="1" max="256" value="16">
+    <button id="btn-run">▶ Run</button>
+    <button id="btn-reset">↺ Reset</button>
+  </div>
+</div>
+
+<div class="panels">
+
+  <!-- HF Baseline -->
+  <div class="panel hf">
+    <div class="panel-title">
+      🟠 HF Baseline
+      <span class="sub">(Sequential — one at a time)</span>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div class="lbl">Queue — waiting</div>
+      <div class="chip-row" id="hf-queue"></div>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div class="lbl">GPU — processing</div>
+      <div class="gpu-box" id="hf-gpu"><div class="gpu-idle">Idle</div></div>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div class="lbl">Done ✓</div>
+      <div class="done-strip" id="hf-done"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-v" id="hf-t">0.0s</div><div class="stat-l">Elapsed</div></div>
+      <div class="stat"><div class="stat-v" id="hf-tps">—</div><div class="stat-l">tok/s</div></div>
+      <div class="stat"><div class="stat-v" id="hf-cnt">0/4</div><div class="stat-l">Done</div></div>
+    </div>
+  </div>
+
+  <!-- vLLM -->
+  <div class="panel vllm">
+    <div class="panel-title">
+      🔵 vLLM
+      <span class="sub">(Continuous Batching + PagedAttention)</span>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div class="lbl">Queue — waiting</div>
+      <div class="chip-row" id="vllm-queue"></div>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div class="lbl">GPU — continuous batch (<span id="batch-active">0</span>/<span id="batch-max">16</span> active)</div>
+      <div class="gpu-box" id="vllm-gpu"><div class="gpu-idle">Idle</div></div>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div class="lbl">Done ✓</div>
+      <div class="done-strip" id="vllm-done"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-v" id="vllm-t">0.0s</div><div class="stat-l">Elapsed</div></div>
+      <div class="stat"><div class="stat-v" id="vllm-tps">—</div><div class="stat-l">tok/s</div></div>
+      <div class="stat"><div class="stat-v" id="vllm-cnt">0/4</div><div class="stat-l">Done</div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Memory -->
+<div class="mem-row">
+  <div class="mem-card">
+    <h3>🟠 HF KV Cache — Static allocation (fragmented)</h3>
+    <div class="mem-grid" id="hf-mem"></div>
+    <div class="mem-note">Each request gets one large contiguous block. Unused cells are wasted.</div>
+  </div>
+  <div class="mem-card">
+    <h3>🔵 vLLM KV Cache — PagedAttention (demand-paged)</h3>
+    <div class="mem-grid" id="vllm-mem"></div>
+    <div class="mem-note">Small pages allocated on demand as tokens are generated. Freed when request finishes.</div>
+  </div>
+</div>
+
+<!-- Summary -->
+<div class="summary" id="summary">
+  <h2>✓ Simulation Complete</h2>
+  <div class="sg">
+    <div class="si"><div class="sv" style="color:#f39c12" id="s-hf-t">—</div><div class="sl">HF Total Time</div></div>
+    <div class="si"><div class="sv" style="color:#2e86de" id="s-vt">—</div><div class="sl">vLLM Total Time</div></div>
+    <div class="si"><div class="sv green" id="s-speed">—</div><div class="sl">Time Speedup</div></div>
+    <div class="si"><div class="sv" style="color:#f39c12" id="s-hf-tps">—</div><div class="sl">HF Throughput</div></div>
+    <div class="si"><div class="sv" style="color:#2e86de" id="s-vtps">—</div><div class="sl">vLLM Throughput</div></div>
+    <div class="si"><div class="sv green" id="s-gain">—</div><div class="sl">Throughput Gain</div></div>
+  </div>
+  <div class="snote">* Simulation uses compressed time. Actual T4 lab results: HF ~22 tok/s flat, vLLM 776 tok/s @ N=16.</div>
+</div>
+
+<script>
+/* ── Config ─────────────────────────────────────────────── */
+let   MAX_BATCH    = 16;    // vLLM max concurrent in batch (user-configurable)
+const TOKENS       = 150;   // output tokens per request
+const TICK_MS      = 50;    // animation tick
+const MAX_SHOW_Q   = 10;    // max chips to show in queue
+const MAX_SHOW_D   = 8;     // max chips to show in done area
+const MAX_SHOW_GPU = 6;     // max GPU slots shown
+const SIM_MAX_MS   = 9000;  // cap HF total sim time
+
+const HF_COLOR   = '#f39c12';
+const VLLM_COLOR = '#2e86de';
+
+const $ = id => document.getElementById(id);
+
+/* ── Chip helpers ───────────────────────────────────────── */
+function makeChip(prefix, id, panelColor, cls='') {
+  const d = document.createElement('div');
+  d.className = 'chip ' + cls;
+  d.id = `${prefix}-chip-${id}`;
+  d.style.background = panelColor;
+  d.style.color = '#fff';
+  d.textContent = id <= 99 ? `${id}` : '..';
+  return d;
+}
+
+function moreBadge(count) {
+  const d = document.createElement('div');
+  d.className = 'more-badge';
+  d.textContent = `+${count} more`;
+  return d;
+}
+
+function renderQueue(domId, ids, totalWaiting, panelColor) {
+  const el = $(domId);
+  el.innerHTML = '';
+  const show = Math.min(ids.length, MAX_SHOW_Q);
+  for (let i = 0; i < show; i++) el.appendChild(makeChip(domId, ids[i], panelColor, 'dim'));
+  if (totalWaiting > show) el.appendChild(moreBadge(totalWaiting - show));
+}
+
+function renderDone(domId, doneIds, total, panelColor) {
+  const el = $(domId);
+  el.innerHTML = '';
+  const n = doneIds.length;
+  if (n === 0) return;
+  const show = Math.min(n, MAX_SHOW_D);
+  for (let i = n - show; i < n; i++) {
+    const d = document.createElement('div');
+    d.className = 'chip';
+    d.style.background = panelColor;
+    d.style.color = '#fff';
+    d.textContent = doneIds[i] <= 99 ? `${doneIds[i]}` : '..';
+    el.appendChild(d);
+  }
+  if (n > MAX_SHOW_D) {
+    const b = document.createElement('div');
+    b.className = 'done-count';
+    b.style.color = '#2ecc71';
+    b.textContent = `✓ ${n}/${total}`;
+    el.prepend(b);
+  }
+}
+
+/* ── Memory grid ────────────────────────────────────────── */
+const MEM_CELLS = 100;
+
+function initMem(gId) {
+  const g = $(gId);
+  g.innerHTML = '';
+  for (let i = 0; i < MEM_CELLS; i++) {
+    const c = document.createElement('div');
+    c.className = 'mc';
+    c.id = `${gId}-${i}`;
+    g.appendChild(c);
+  }
+}
+
+function drawHFMem(n, activeBatch) {
+  for (let i = 0; i < MEM_CELLS; i++) {
+    const c = $(`hf-mem-${i}`);
+    if (c) { c.style.background = '#21262d'; c.style.opacity = '1'; }
+  }
+  const blockSize = Math.max(1, Math.floor(MEM_CELLS / Math.max(n, 1)));
+  const used = Math.floor(blockSize * 0.62);
+
+  activeBatch.forEach(req => {
+    const idx = req.id - 1;
+    const start = idx * blockSize;
+    for (let i = start; i < start + used && i < MEM_CELLS; i++) {
+      const c = $(`hf-mem-${i}`);
+      if (c) { c.style.background = HF_COLOR; c.style.opacity = '1'; }
+    }
+    for (let i = start + used; i < start + blockSize && i < MEM_CELLS; i++) {
+      const c = $(`hf-mem-${i}`);
+      if (c) { c.style.background = HF_COLOR; c.style.opacity = '0.15'; }
+    }
+  });
+}
+
+function drawVLLMMem(batchItems) {
+  for (let i = 0; i < MEM_CELLS; i++) {
+    const c = $(`vllm-mem-${i}`);
+    if (c) { c.style.background = '#21262d'; c.style.opacity = '1'; }
+  }
+  let cell = 0;
+  const pages = Math.max(2, Math.floor(MEM_CELLS / MAX_BATCH));
+  batchItems.forEach(req => {
+    const filled = Math.floor(pages * req.progress);
+    for (let i = 0; i < filled && cell < MEM_CELLS; i++, cell++) {
+      const c = $(`vllm-mem-${cell}`);
+      if (c) { c.style.background = VLLM_COLOR; c.style.opacity = '1'; }
+    }
+    cell += (pages - filled);
+  });
+}
+
+/* ── GPU slot rendering ─────────────────────────────────── */
+function renderHFGpu(req) {
+  const gpu = $('hf-gpu');
+  if (!req) { gpu.innerHTML = '<div class="gpu-idle">Idle — switching…</div>'; return; }
+  gpu.innerHTML = '';
+  const s = document.createElement('div');
+  s.className = 'slot';
+  s.innerHTML = `
+    <div class="slot-lbl" style="color:${HF_COLOR}">U${req.id}</div>
+    <div class="track"><div class="fill" id="hf-fill" style="background:${HF_COLOR}"></div></div>
+    <div class="slot-pct" id="hf-pct">0%</div>`;
+  gpu.appendChild(s);
+}
+
+function updateHFGpu(req) {
+  const fill = $('hf-fill'), pct = $('hf-pct');
+  if (fill) fill.style.width = `${req.progress * 100}%`;
+  if (pct)  pct.textContent  = `${Math.round(req.progress * 100)}%`;
+}
+
+function renderVLLMGpu(batch, maxBatch) {
+  const gpu = $('vllm-gpu');
+  gpu.innerHTML = '';
+
+  if (batch.length === 0) {
+    gpu.innerHTML = '<div class="gpu-idle">Idle</div>';
+    $('batch-active').textContent = 0;
+    return;
+  }
+
+  // Batch utilization bar
+  const bi = document.createElement('div');
+  bi.className = 'batch-info';
+  bi.innerHTML = `
+    <span>Batch: ${batch.length}/${maxBatch}</span>
+    <div class="batch-fill-bar">
+      <div class="batch-fill-inner" style="width:${(batch.length/maxBatch)*100}%"></div>
+    </div>`;
+  gpu.appendChild(bi);
+  $('batch-active').textContent = batch.length;
+
+  const show = Math.min(batch.length, MAX_SHOW_GPU);
+  for (let i = 0; i < show; i++) {
+    const req = batch[i];
+    const s = document.createElement('div');
+    s.className = 'slot';
+    s.id = `vslot-${req.id}`;
+    s.innerHTML = `
+      <div class="slot-lbl" style="color:${VLLM_COLOR}">U${req.id}</div>
+      <div class="track"><div class="fill" id="vfill-${req.id}" style="background:${VLLM_COLOR};width:${req.progress*100}%"></div></div>
+      <div class="slot-pct" id="vpct-${req.id}">${Math.round(req.progress*100)}%</div>`;
+    gpu.appendChild(s);
+  }
+  if (batch.length > MAX_SHOW_GPU) {
+    const ml = document.createElement('div');
+    ml.className = 'more-slots';
+    ml.textContent = `+ ${batch.length - MAX_SHOW_GPU} more slots in batch…`;
+    gpu.appendChild(ml);
+  }
+}
+
+/* ── Simulation ─────────────────────────────────────────── */
+class Sim {
+  constructor(n) {
+    this.n = n;
+
+    // Auto-scale timing so HF total ≈ SIM_MAX_MS
+    this.hfMs    = Math.min(1500, Math.floor(SIM_MAX_MS / n));
+    this.vllmMs  = Math.floor(this.hfMs * 0.60); // vLLM ~40% faster per slot
+    this.jitter  = this.vllmMs * 0.25;           // ±25% random variation per request
+
+    // HF state
+    this.hfQueue    = Array.from({length: n}, (_, i) => i + 1);
+    this.hfCurrent  = null;
+    this.hfDoneList = [];
+    this.hfTokens   = 0;
+    this.hfEndTime  = null;
+
+    // vLLM state
+    this.vQueue   = Array.from({length: n}, (_, i) => i + 1);
+    this.vBatch   = [];   // { id, startTime, duration, progress }
+    this.vDoneList = [];
+    this.vTokens  = 0;
+    this.vEndTime = null;
+
+    this.t0     = null;
+    this.tickId = null;
+    this.hfDone = false;
+    this.vDone  = false;
+  }
+
+  start() {
+    this.t0 = performance.now();
+    this._initDOM();
+    // vLLM: fill batch immediately
+    this._vFillBatch(0);
+    this.tickId = setInterval(() => this._tick(), TICK_MS);
+  }
+
+  stop() {
+    if (this.tickId) clearInterval(this.tickId);
+    this.tickId = null;
+  }
+
+  _initDOM() {
+    renderQueue('hf-queue',   this.hfQueue, this.n, HF_COLOR);
+    renderQueue('vllm-queue', this.vQueue,  this.n, VLLM_COLOR);
+    $('hf-gpu').innerHTML   = '<div class="gpu-idle">Idle</div>';
+    $('vllm-gpu').innerHTML = '<div class="gpu-idle">Loading…</div>';
+    $('hf-done').innerHTML   = '';
+    $('vllm-done').innerHTML = '';
+    $('hf-cnt').textContent   = `0/${this.n}`;
+    $('vllm-cnt').textContent = `0/${this.n}`;
+    $('hf-t').textContent   = '0.0s';
+    $('vllm-t').textContent = '0.0s';
+    $('hf-tps').textContent   = '—';
+    $('vllm-tps').textContent = '—';
+    $('batch-active').textContent = 0;
+    $('batch-max').textContent    = MAX_BATCH;
+    initMem('hf-mem');
+    initMem('vllm-mem');
+    $('summary').style.display = 'none';
+  }
+
+  _vFillBatch(elapsed) {
+    while (this.vBatch.length < MAX_BATCH && this.vQueue.length > 0) {
+      const id  = this.vQueue.shift();
+      const dur = this.vllmMs + (Math.random() * 2 - 1) * this.jitter;
+      this.vBatch.push({ id, startTime: elapsed, duration: dur, progress: 0 });
+    }
+  }
+
+  _tick() {
+    const elapsed = performance.now() - this.t0;
+    if (!this.hfDone) this._tickHF(elapsed);
+    if (!this.vDone)  this._tickVLLM(elapsed);
+    if (this.hfDone && this.vDone) {
+      this.stop();
+      this._showSummary();
+      $('btn-run').disabled  = false;
+      $('n-slider').disabled = false;
+      $('n-input').disabled  = false;
+      $('mb-input').disabled = false;
+    }
+  }
+
+  _tickHF(elapsed) {
+    // Start next if idle
+    if (!this.hfCurrent && this.hfQueue.length > 0) {
+      const id = this.hfQueue.shift();
+      this.hfCurrent = { id, startTime: elapsed, duration: this.hfMs, progress: 0 };
+      renderHFGpu(this.hfCurrent);
+      renderQueue('hf-queue', this.hfQueue, this.hfQueue.length, HF_COLOR);
+      drawHFMem(this.n, [this.hfCurrent]);
+    }
+
+    if (this.hfCurrent) {
+      this.hfCurrent.progress = Math.min(1, (elapsed - this.hfCurrent.startTime) / this.hfCurrent.duration);
+      updateHFGpu(this.hfCurrent);
+      drawHFMem(this.n, [this.hfCurrent]);
+
+      if (this.hfCurrent.progress >= 1) {
+        this.hfDoneList.push(this.hfCurrent.id);
+        this.hfTokens += TOKENS;
+        this.hfCurrent = null;
+        renderHFGpu(null);
+        renderDone('hf-done', this.hfDoneList, this.n, HF_COLOR);
+
+        if (this.hfDoneList.length === this.n) {
+          this.hfEndTime = elapsed;
+          this.hfDone = true;
+        }
+      }
+    }
+
+    const s = elapsed / 1000;
+    $('hf-t').textContent   = `${s.toFixed(3)}s`;
+    $('hf-cnt').textContent = `${this.hfDoneList.length}/${this.n}`;
+    if (this.hfTokens > 0)
+      $('hf-tps').textContent = `${Math.round(this.hfTokens / s)}`;
+  }
+
+  _tickVLLM(elapsed) {
+    // Update batch progress and collect completed
+    const nowDone = [];
+    this.vBatch.forEach(req => {
+      req.progress = Math.min(1, (elapsed - req.startTime) / req.duration);
+      if (req.progress >= 1) nowDone.push(req.id);
+    });
+
+    // Complete done, fill slots from queue (continuous batching!)
+    if (nowDone.length > 0) {
+      this.vBatch = this.vBatch.filter(r => !nowDone.includes(r.id));
+      nowDone.forEach(id => {
+        this.vDoneList.push(id);
+        this.vTokens += TOKENS;
+      });
+      // Immediately fill freed slots
+      this._vFillBatch(elapsed);
+      renderQueue('vllm-queue', this.vQueue, this.vQueue.length, VLLM_COLOR);
+      renderDone('vllm-done', this.vDoneList, this.n, VLLM_COLOR);
+    }
+
+    renderVLLMGpu(this.vBatch, MAX_BATCH);
+    drawVLLMMem(this.vBatch);
+
+    if (this.vDoneList.length === this.n && this.vBatch.length === 0 && !this.vDone) {
+      this.vEndTime = elapsed;
+      this.vDone = true;
+      $('vllm-gpu').innerHTML = '<div class="gpu-idle" style="color:#2ecc71">✓ All requests complete</div>';
+      $('batch-active').textContent = 0;
+    }
+
+    const s = elapsed / 1000;
+    $('vllm-t').textContent   = `${s.toFixed(3)}s`;
+    $('vllm-cnt').textContent = `${this.vDoneList.length}/${this.n}`;
+    if (this.vTokens > 0)
+      $('vllm-tps').textContent = `${Math.round(this.vTokens / s)}`;
+  }
+
+  _showSummary() {
+    const hfT  = this.hfEndTime  / 1000;
+    const vT   = this.vEndTime   / 1000;
+    const spd  = (hfT / vT).toFixed(1);
+    const hfTps = Math.round(this.n * TOKENS / hfT);
+    const vTps  = Math.round(this.n * TOKENS / vT);
+    const gain  = (vTps / hfTps).toFixed(1);
+
+    $('s-hf-t').textContent  = `${hfT.toFixed(3)}s`;
+    $('s-vt').textContent    = `${vT.toFixed(3)}s`;
+    $('s-speed').textContent = `${spd}x faster`;
+    $('s-hf-tps').textContent = `${hfTps} tok/s`;
+    $('s-vtps').textContent   = `${vTps} tok/s`;
+    $('s-gain').textContent   = `${gain}x throughput`;
+
+    $('summary').style.display = 'block';
+    $('summary').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+/* ── Controls ───────────────────────────────────────────── */
+let N = 16, sim = null;
+
+function setN(val) {
+  const parsed = parseInt(val);
+  if (isNaN(parsed) || parsed < 1) return;
+  N = Math.min(parsed, 100000);
+  $('n-input').value  = N;
+  $('n-slider').value = Math.min(N, 100);
+  $('hf-cnt').textContent   = `0/${N}`;
+  $('vllm-cnt').textContent = `0/${N}`;
+}
+
+$('n-slider').addEventListener('input', e => setN(e.target.value));
+
+$('n-input').addEventListener('change', e => {
+  const v = parseInt(e.target.value);
+  if (isNaN(v) || v < 1) { e.target.value = N; return; }
+  setN(Math.min(v, 100000));
+});
+$('n-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('n-input').blur();
+});
+
+function setMaxBatch(val) {
+  const v = parseInt(val);
+  if (isNaN(v) || v < 1) return;
+  MAX_BATCH = Math.min(v, 256);
+  $('mb-input').value = MAX_BATCH;
+  $('batch-max').textContent = MAX_BATCH;
+}
+
+$('mb-input').addEventListener('change', e => setMaxBatch(e.target.value));
+$('mb-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('mb-input').blur();
+});
+
+$('btn-run').addEventListener('click', () => {
+  if (sim) sim.stop();
+  $('btn-run').disabled  = true;
+  $('n-slider').disabled = true;
+  $('n-input').disabled  = true;
+  $('mb-input').disabled = true;
+  sim = new Sim(N);
+  sim.start();
+});
+
+$('btn-reset').addEventListener('click', () => {
+  if (sim) sim.stop();
+  sim = null;
+  $('btn-run').disabled  = false;
+  $('n-slider').disabled = false;
+  $('n-input').disabled  = false;
+  $('mb-input').disabled = false;
+  $('hf-queue').innerHTML   = '';
+  $('vllm-queue').innerHTML = '';
+  $('hf-gpu').innerHTML     = '<div class="gpu-idle">Idle</div>';
+  $('vllm-gpu').innerHTML   = '<div class="gpu-idle">Idle</div>';
+  $('hf-done').innerHTML    = '';
+  $('vllm-done').innerHTML  = '';
+  $('hf-t').textContent  = '0.0s'; $('hf-tps').textContent  = '—'; $('hf-cnt').textContent  = `0/${N}`;
+  $('vllm-t').textContent = '0.0s'; $('vllm-tps').textContent = '—'; $('vllm-cnt').textContent = `0/${N}`;
+  $('batch-active').textContent = 0;
+  initMem('hf-mem');
+  initMem('vllm-mem');
+  $('summary').style.display = 'none';
+});
+
+/* ── Init ───────────────────────────────────────────────── */
+setN(16); // default
+initMem('hf-mem');
+initMem('vllm-mem');
+</script>
+</body>
+</html>
