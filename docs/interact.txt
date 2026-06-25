@@ -122,18 +122,27 @@ def baseline_generate(prompt):
 # ถ้าไม่ warmup latency run แรกจะสูงผิดปกติทำให้ค่าเฉลี่ยเบี้ยว
 baseline_generate(BENCHMARK_PROMPT)
 
+_log = open('HF-A.log', 'w')
 latencies = []
 for i in range(N_RUNS):
     text, latency, n_tokens = baseline_generate(BENCHMARK_PROMPT)
     latencies.append(latency)
-    print(f'Run {i+1}: {latency:.2f}s | {n_tokens/latency:.1f} tok/s')
+    tok_s = n_tokens / latency
+    print(f'Run {i+1}: {latency:.2f}s | {tok_s:.1f} tok/s')
+    _log.write(f'ask#{i+1}: {BENCHMARK_PROMPT}\n')
+    _log.write(f'answer#{i+1}: {text}\n')
+    _log.write(f'time: {latency:.2f}s | {tok_s:.1f} tok/s\n\n')
 
 results['baseline']['exp_a'] = {
     'latencies': latencies,
     'mean': sum(latencies) / len(latencies),
     'output_sample': text,
 }
-print(f'\nMean latency: {results["baseline"]["exp_a"]["mean"]:.2f}s')
+mean = results['baseline']['exp_a']['mean']
+print(f'\nMean latency: {mean:.2f}s')
+_log.write(f'--- Summary ---\nMean latency: {mean:.2f}s\n')
+_log.close()
+print('Saved: HF-A.log')
 ```
 
 
@@ -141,11 +150,15 @@ print(f'\nMean latency: {results["baseline"]["exp_a"]["mean"]:.2f}s')
 
 ```python
 baseline_exp_b = {}
+_log = open('HF-B.log', 'w')
 
 for n in CONCURRENCY_LEVELS:
     batch = [PROMPTS[i % len(PROMPTS)] for i in range(n)]
     t0 = time.perf_counter()
     total_tokens = 0
+    _log.write(f'=== Concurrency {n} ===\n')
+    for j, prompt in enumerate(batch):
+        _log.write(f'ask#{j+1}: {prompt}\n')
     # loop นี้คือ naive serving - ประมวลผลทีละ request ไม่มี batching
     # จำลองว่า server ธรรมดารับ user 1 คนต่อครั้ง user ที่เหลือรอคิว
     for prompt in batch:
@@ -155,9 +168,15 @@ for n in CONCURRENCY_LEVELS:
     throughput = total_tokens / elapsed
     baseline_exp_b[n] = throughput
     print(f'Concurrency {n:2d} | {throughput:6.1f} tok/s | {elapsed:.1f}s total')
+    _log.write(f'throughput: {throughput:.1f} tok/s | elapsed: {elapsed:.1f}s\n\n')
 
 results['baseline']['exp_b'] = baseline_exp_b
+_log.write('--- Summary ---\n')
+for n, tps in baseline_exp_b.items():
+    _log.write(f'Concurrency {n:2d}: {tps:.1f} tok/s\n')
+_log.close()
 print('\nBaseline Exp B done.')
+print('Saved: HF-B.log')
 ```
 
 
@@ -184,18 +203,27 @@ def vllm_generate(prompt):
 # warmup
 vllm_generate(BENCHMARK_PROMPT)
 
+_log = open('vLLM-A.log', 'w')
 latencies = []
 for i in range(N_RUNS):
     text, latency, n_tokens = vllm_generate(BENCHMARK_PROMPT)
     latencies.append(latency)
-    print(f'Run {i+1}: {latency:.2f}s | {n_tokens/latency:.1f} tok/s')
+    tok_s = n_tokens / latency
+    print(f'Run {i+1}: {latency:.2f}s | {tok_s:.1f} tok/s')
+    _log.write(f'ask#{i+1}: {BENCHMARK_PROMPT}\n')
+    _log.write(f'answer#{i+1}: {text}\n')
+    _log.write(f'time: {latency:.2f}s | {tok_s:.1f} tok/s\n\n')
 
 results['vllm']['exp_a'] = {
     'latencies': latencies,
     'mean': sum(latencies) / len(latencies),
     'output_sample': text,
 }
-print(f'\nMean latency: {results["vllm"]["exp_a"]["mean"]:.2f}s')
+mean = results['vllm']['exp_a']['mean']
+print(f'\nMean latency: {mean:.2f}s')
+_log.write(f'--- Summary ---\nMean latency: {mean:.2f}s\n')
+_log.close()
+print('Saved: vLLM-A.log')
 ```
 
 
