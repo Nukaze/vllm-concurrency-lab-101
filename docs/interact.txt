@@ -223,20 +223,20 @@ async def run_concurrent(n):
     # vLLM ฝั่ง server รับทุก request แล้วจัดการผ่าน continuous batching อัตโนมัติ
     token_counts = await asyncio.gather(*[vllm_generate_async(p) for p in batch])  # สร้าง coroutine ทุกตัวแล้วส่งพร้อมกัน, await รอจนทุก request ตอบกลับครบ
     elapsed = time.perf_counter() - t0
-    return sum(token_counts) / elapsed
+    return sum(token_counts) / elapsed, elapsed
 
 async def run_all_concurrent():
     out = {}
     _log = open('vLLM-B.log', 'w')
     for n in CONCURRENCY_LEVELS:
-        throughput = await run_concurrent(n)
+        throughput, elapsed = await run_concurrent(n)
         batch = [PROMPTS[i % len(PROMPTS)] for i in range(n)]
         out[n] = throughput
-        print(f'Concurrency {n:2d} | {throughput:6.1f} tok/s')
+        print(f'Concurrency {n:2d} | {throughput:6.1f} tok/s | {elapsed:.1f}s total')
         _log.write(f'=== Concurrency {n} ===\n')
         for j, prompt in enumerate(batch):
             _log.write(f'ask#{j+1}: {prompt}\n')
-        _log.write(f'throughput: {throughput:.1f} tok/s\n\n')
+        _log.write(f'throughput: {throughput:.1f} tok/s | elapsed: {elapsed:.1f}s\n\n')
     _log.write('--- Summary ---\n')
     for n, tps in out.items():
         _log.write(f'Concurrency {n:2d}: {tps:.1f} tok/s\n')
