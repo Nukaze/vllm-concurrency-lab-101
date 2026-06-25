@@ -2,59 +2,72 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Nukaze/vllm-concurrency-lab-101/blob/main/lab.ipynb)
 
-A 2-3 hour hands-on lab comparing HF Transformers naive serving vs vLLM on the same model and hardware.
+Lab ลงมือทำ 2-3 ชั่วโมง เปรียบเทียบสองวิธีในการให้บริการโมเดล AI บนเครื่องและโมเดลเดียวกัน -- วิธีทั่วไป (HF Transformers) กับ vLLM ที่ออกแบบมาสำหรับการรองรับผู้ใช้จำนวนมากพร้อมกัน
 
-**Key question:** If the model weights are identical, why does choosing the serving engine change whether your system handles 10 users or 200 users simultaneously?
-
----
-
-## What you will measure
-
-| Exp | Metric | What to look for |
-|-----|--------|-----------------|
-| A | Single request latency | Baseline vs vLLM time-to-completion |
-| B | Concurrent throughput | Throughput curve as N users increases - where does baseline plateau? |
-| C | Output accuracy diff | Are outputs near-identical on same weights? |
+**คำถามหลัก:** ถ้าใช้โมเดล AI ตัวเดียวกัน เครื่องเดียวกัน ทำไมการเลือก "วิธีให้บริการ" ถึงเปลี่ยนได้ว่าระบบจะรองรับผู้ใช้ได้ 10 คน หรือ 200 คนพร้อมกัน?
 
 ---
 
-## Setup
+## สิ่งที่จะทดลองใน Lab
 
-1. Click **Open In Colab** above
-2. Go to **Runtime > Change runtime type > T4 GPU** (required - vLLM needs CUDA)
-3. Run all cells top to bottom
-
-> CPU or TPU runtimes will not work. v5e TPU is not supported by vLLM.
-
----
-
-## Stack
-
-| Component | Choice |
-|-----------|--------|
-| GPU | Google Colab T4 (free tier, 15GB VRAM) |
-| Model | `Qwen/Qwen2.5-1.5B-Instruct` |
-| Baseline | HF Transformers - sequential, no batching |
-| vLLM | OpenAI-compatible server (`vllm serve`) |
-| Load test | `asyncio.gather()` - concurrent requests |
+| การทดลอง | วัดอะไร | ดูอะไร |
+|----------|---------|--------|
+| A | ความเร็วต่อ 1 คำขอ | วิธีไหนตอบกลับเร็วกว่า |
+| B | ปริมาณงานเมื่อมีผู้ใช้พร้อมกัน (1, 2, 4, 8, 16 คน) | วิธีทั่วไปเริ่มช้าลง/ล่มตรงไหน |
+| C | ความแม่นยำของคำตอบ | โมเดลเดียวกัน ตอบเหมือนกันไหม |
 
 ---
 
-## Repo structure
+## วิธีเริ่มต้น
+
+1. กด **Open In Colab** ด้านบน
+2. บันทึก notebook ลง Google Drive ก่อน: **File > Save a copy in Drive**
+   (ถ้าไม่บันทึกแล้ว runtime หลุด จะต้องเริ่มใหม่ทั้งหมด)
+3. เปลี่ยนประเภท runtime เป็น GPU: **Runtime > Change runtime type > T4 GPU**
+   (จำเป็น -- vLLM ต้องใช้ GPU เท่านั้น ใช้ CPU หรือ TPU ไม่ได้)
+4. รัน cell ทั้งหมดจากบนลงล่าง
+
+> **หมายเหตุ:** v5e TPU และ CPU runtime ใช้กับ lab นี้ไม่ได้
+
+---
+
+## สิ่งที่ Lab ใช้
+
+| ส่วนประกอบ | รายละเอียด |
+|------------|------------|
+| GPU | Google Colab T4 (ฟรีทีเออร์, VRAM 15GB) |
+| โมเดล AI | `Qwen/Qwen2.5-1.5B-Instruct` (ใช้ตัวเดียวกันทั้งสองวิธี) |
+| วิธีทั่วไป | HF Transformers -- ประมวลผลทีละคำขอ ไม่มีการรวม batch |
+| vLLM | Server ที่ใช้ OpenAI-compatible API (`vllm serve`) |
+| จำลองผู้ใช้พร้อมกัน | `asyncio.gather()` -- ส่งคำขอหลายอันพร้อมกัน |
+| แสดงผล | กราฟ matplotlib ภายใน notebook |
+
+---
+
+## โครงสร้างไฟล์
 
 ```
 vllm-concurrency-lab-101/
-├── lab.ipynb                # Main lab notebook (run this in Colab)
-├── vllm-lab-slide-outline.md  # Slide deck outline for instructors
-└── .gitignore
+├── lab.ipynb               -- notebook หลัก (รันบน Colab)
+└── docs/
+    ├── vllm-lab-slide-outline.md  -- outline สไลด์สำหรับผู้สอน
+    ├── interact.txt               -- draft ฟีเจอร์ interactive ที่ยังอยู่ระหว่างออกแบบ
+    └── handover.txt               -- บันทึก session ก่อนหน้า
 ```
 
 ---
 
-## Expected results (T4 free tier)
+## ผลที่คาดว่าจะเห็น (บน T4 ฟรีทีเออร์)
 
-- **Exp A:** vLLM typically 1.2-2x faster on single requests due to optimized CUDA kernels
-- **Exp B:** Baseline throughput flattens or degrades beyond 4-8 concurrent users; vLLM continues scaling
-- **Exp C:** Similarity score > 0.95 - same weights, near-identical outputs
+- **การทดลอง A:** vLLM ตอบเร็วกว่าวิธีทั่วไป ประมาณ 1.2-2 เท่า
+- **การทดลอง B:** วิธีทั่วไปเริ่มช้าลงหรือล่มเมื่อมีผู้ใช้พร้อมกัน 4-8 คน ขณะที่ vLLM ยังรองรับได้ต่อเนื่อง
+- **การทดลอง C:** คะแนนความเหมือน > 0.95 -- โมเดลเดียวกัน ตอบแทบไม่ต่างกัน
 
-The gap widens on larger GPUs (A100, H100) - free tier proves the algorithm advantage before hardware scaling amplifies it.
+ช่องว่างระหว่างสองวิธีจะยิ่งเห็นชัดขึ้นบน GPU ที่ดีกว่า (A100, H100) -- ฟรีทีเออร์พิสูจน์ได้แล้วว่า vLLM ได้เปรียบจาก "วิธีคิด" ไม่ใช่จากฮาร์ดแวร์
+
+---
+
+## รัน Lab บน Windows (ไม่ใช้ Colab)
+
+สำหรับคนที่อยากรันบนเครื่องตัวเองแทน -- ดูขั้นตอนได้ใน **Appendix** ท้าย notebook
+ต้องใช้ WSL2 + NVIDIA GPU ที่มี VRAM อย่างน้อย 6GB (RTX 3060 / RTX 4060 ขึ้นไป)
