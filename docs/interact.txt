@@ -96,6 +96,7 @@ SOLUTION REFERENCE (instructor copy - full cells with TODOs filled)
 
 --- cell-7: baseline_generate (Exp A) ---
 
+```python
 def baseline_generate(prompt):
     # ต้องใช้ chat template เพื่อให้ baseline และ vLLM ได้รับ prompt format เดียวกัน
     # ถ้าไม่ทำ Exp C จะเทียบผลไม่ได้ เพราะ input จริงๆ ต่างกัน
@@ -133,10 +134,12 @@ results['baseline']['exp_a'] = {
     'output_sample': text,
 }
 print(f'\nMean latency: {results["baseline"]["exp_a"]["mean"]:.2f}s')
+```
 
 
 --- cell-9: Exp B baseline loop ---
 
+```python
 baseline_exp_b = {}
 
 for n in CONCURRENCY_LEVELS:
@@ -155,10 +158,12 @@ for n in CONCURRENCY_LEVELS:
 
 results['baseline']['exp_b'] = baseline_exp_b
 print('\nBaseline Exp B done.')
+```
 
 
 --- cell-15: vllm_generate (Exp A vLLM) ---
 
+```python
 from openai import OpenAI
 
 client = OpenAI(base_url='http://localhost:8000/v1', api_key='dummy')
@@ -191,10 +196,12 @@ results['vllm']['exp_a'] = {
     'output_sample': text,
 }
 print(f'\nMean latency: {results["vllm"]["exp_a"]["mean"]:.2f}s')
+```
 
 
 --- cell-17: run_concurrent (Exp B vLLM) ---
 
+```python
 from openai import AsyncOpenAI
 
 async_client = AsyncOpenAI(base_url='http://localhost:8000/v1', api_key='dummy')
@@ -230,3 +237,4 @@ async def run_all_concurrent():
 vllm_exp_b = asyncio.get_event_loop().run_until_complete(run_all_concurrent())
 results['vllm']['exp_b'] = vllm_exp_b
 print('\nvLLM Exp B done.')
+```
